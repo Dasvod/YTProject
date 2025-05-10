@@ -4,7 +4,7 @@ on:
   schedule:
     # Short ogni ora
     - cron: '0 * * * *'
-    # Long-form (8-10 min) il venerdì alle 18:00 CET
+    # Long-form (8-10 min) ogni venerdì alle 18:00 CET
     - cron: '0 18 * * FRI'
   workflow_dispatch:
 
@@ -13,26 +13,24 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # 0) Seleziona Python 3.11
+    # 0) Setup Python 3.11
     - uses: actions/setup-python@v5
       with:
         python-version: '3.11'
 
-    # 1) Clona il repo
+    # 1) Checkout del repository
     - uses: actions/checkout@v4
 
-    # 2) Installa dipendenze
+    # 2) Installa ffmpeg + wget e poi tutte le dipendenze Python
     - name: Install system & Python deps
       run: |
         sudo apt-get update -y
         sudo apt-get install -y ffmpeg wget
-        python -m pip install --upgrade pip
-        # installa i requirements nello stesso site-packages di Python 3.11
-        PIP_BREAK_SYSTEM_PACKAGES=1 python -m pip install -r requirements.txt
-        # installa Piper TTS (senza dipendenze extra)
-        PIP_BREAK_SYSTEM_PACKAGES=1 python -m pip install piper-tts==1.2.0 --no-deps
+        python3 -m pip install --upgrade pip
+        python3 -m pip install --user -r requirements.txt
+        python3 -m pip install --user piper-tts==1.2.0 --no-deps
 
-    # 3) Avvia la pipeline
+    # 3) Avvia la pipeline con python3 -E (carica anche ~/.local)
     - name: Run pipeline
       env:
         PEXELS_KEY:   ${{ secrets.PEXELS_KEY }}
@@ -44,4 +42,4 @@ jobs:
         else
           MODE=long
         fi
-        python scripts/pipeline.py --mode $MODE
+        python3 -E scripts/pipeline.py --mode $MODE
