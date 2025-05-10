@@ -1,0 +1,29 @@
+name: YouTube Bot
+
+on:
+  schedule:
+    - cron:  '0 * * * *'       # Short ogni ora
+    - cron:  '0 18 * * FRI'    # Long-form venerdì 18:00 CET
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install system deps
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install -y ffmpeg wget piper-tts
+        pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run pipeline
+      env:
+        PEXELS_KEY:   ${{ secrets.PEXELS_KEY }}
+        HF_TOKEN:     ${{ secrets.HF_TOKEN }}
+        GOOGLE_OAUTH: ${{ secrets.GOOGLE_OAUTH }}
+      run: |
+        MODE=$([[ "${{ github.event.schedule }}" == '0 * * * *' ]] && echo short || echo long)
+        python3 scripts/pipeline.py --mode $MODE
