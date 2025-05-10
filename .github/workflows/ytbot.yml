@@ -3,9 +3,9 @@ name: YouTube Bot
 on:
   schedule:
     # Short ogni ora
-    - cron: '0 * * * *'
+    - cron:  '0 * * * *'
     # Long-form (8-10 min) ogni venerdì alle 18:00 CET
-    - cron: '0 18 * * FRI'
+    - cron:  '0 18 * * FRI'
   workflow_dispatch:      # avvio manuale
 
 jobs:
@@ -13,18 +13,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    # 0) Seleziona Python 3.11 e lo mette in PATH
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
     # 1) Clona il repository
     - uses: actions/checkout@v4
 
     # 2) Installa dipendenze di sistema e Python
-    - name: Install system deps
+    - name: Install system & Python deps
       run: |
         sudo apt-get update -y
-        sudo apt-get install -y ffmpeg wget          # niente piper-tts da apt
-        pip install --upgrade pip
-        pip install -r requirements.txt
-        # installa solo piper-tts ignorando le dep. mancanti
-        pip install piper-tts==1.2.0 --no-deps
+        sudo apt-get install -y ffmpeg wget
+        python -m pip install --upgrade pip
+        python -m pip install -r requirements.txt
+        # Piper TTS (solo binari, skip dependences assenti su PyPI)
+        python -m pip install piper-tts==1.2.0 --no-deps
 
     # 3) Esegue la pipeline (Short o Long in base al cron)
     - name: Run pipeline
@@ -38,4 +43,4 @@ jobs:
         else
           MODE=long
         fi
-        python3 scripts/pipeline.py --mode $MODE
+        python scripts/pipeline.py --mode $MODE
