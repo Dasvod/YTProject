@@ -13,24 +13,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # 0) Setup Python 3.11
+    # 1) Checkout
+    - uses: actions/checkout@v4
+
+    # 2) Setup Python (installa 3.11 e mette `python` in PATH)
     - uses: actions/setup-python@v5
       with:
         python-version: '3.11'
 
-    # 1) Checkout del repository
-    - uses: actions/checkout@v4
-
-    # 2) Installa ffmpeg + wget e poi tutte le dipendenze Python
-    - name: Install system & Python deps
+    # 3) Installa dipendenze di sistema e Python
+    - name: Install dependencies
       run: |
         sudo apt-get update -y
         sudo apt-get install -y ffmpeg wget
-        python3 -m pip install --upgrade pip
-        python3 -m pip install --user -r requirements.txt
-        python3 -m pip install --user piper-tts==1.2.0 --no-deps
+        python -m pip install --upgrade pip
+        # installa tutte le librerie Python nel venv di setup-python
+        python -m pip install -r requirements.txt
+        # installa Piper TTS (skip delle dipendenze mancanti)
+        python -m pip install piper-tts==1.2.0 --no-deps
 
-    # 3) Avvia la pipeline con python3 -E (carica anche ~/.local)
+    # 4) Esegue la pipeline
     - name: Run pipeline
       env:
         PEXELS_KEY:   ${{ secrets.PEXELS_KEY }}
@@ -42,4 +44,4 @@ jobs:
         else
           MODE=long
         fi
-        python3 -E scripts/pipeline.py --mode $MODE
+        python scripts/pipeline.py --mode $MODE
