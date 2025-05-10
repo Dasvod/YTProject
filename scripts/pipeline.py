@@ -8,13 +8,32 @@ from video  import fetch_clips, make_video
 HF   = os.environ["HF_TOKEN"]
 OAUTH= os.environ["GOOGLE_OAUTH"]
 
-def gen_script(prompt):
-    payload = {"inputs": prompt,
-               "parameters": {"temperature": 0.8, "max_new_tokens": 280}}
-    r = requests.post(
-        "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct",
-        headers={"Authorization": f"Bearer {HF}"}, json=payload, timeout=60)
-    return r.json()[0]["generated_text"]
+def gen_script(prompt, topic):
+    """
+    Prova a generare lo script via HF Inference.
+    In caso di errore o JSON invalido, torna un fallback statico.
+    """
+    try:
+        payload = {
+            "inputs": prompt,
+            "parameters": {"temperature": 0.8, "max_new_tokens": 280}
+        }
+        r = requests.post(
+            "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct",
+            headers={"Authorization": f"Bearer {HF}"}, json=payload, timeout=60
+        )
+        r.raise_for_status()
+        data = r.json()
+        return data[0].get("generated_text", "")
+    except Exception:
+        # Fallback breve ma funzionale
+        return (
+            f"Ecco tre curiosità su {topic}:\n"
+            "1) Curiosità numero uno.\n"
+            "2) Curiosità numero due.\n"
+            "3) Curiosità numero tre.\n"
+            "Grazie per aver visto, iscriviti per altri contenuti!"
+        )
 
 def upload(path, title, desc, short=False):
     creds = Credentials.from_authorized_user_info(json.loads(OAUTH))
@@ -31,16 +50,23 @@ def upload(path, title, desc, short=False):
                        body=body, media_body=path).execute()
 
 def run(mode):
-    topic   = pick_topic()
-    prompt  = (f"Scrivi {'1000' if mode=='long' else '140'} parole, "
-               f"tono entusiasta, su {topic}. "
-               f"3 curiosità numerate, chiusura forte.")
-    script  = gen_script(prompt)
-    wav     = "voice.wav"; tts(script, wav)
-    clips   = fetch_clips(topic, 4 if mode=="long" else 3)
-    out     = f"{mode}.mp4"
-    make_video(clips, wav, vertical=(mode=="short"), out=out)
-    upload(out, topic, f"Scopri di più su {topic}!", short=(mode=="short"))
+    topic = pick_topic()
+    if mode == "long":
+        prompt = (
+            f"Scrivi uno script da 1000 parole, tono conversazionale, "
+            f"3 sezioni numerate con esempi, conclusione forte. Tema: {topic}"
+        )
+    else:
+        prompt = (
+            f"Script da 140 parole, tono entusiasmo, 3 curiosità numerate. Tema: {topic}"
+        )
+    script = gen_script(prompt, topic)
+    wav = "voice.wav"
+    tts(script, wav)
+    clips = fetch_clips(topic, 4 if mode == "long" else 3)
+    out = f"{mode}.mp4"
+    make_video(clips, wav, vertical=(mode == "short"), out=out)
+    upload(out, topic, f"Scopri fatti pazzeschi su {topic}!", short=(mode == "short"))
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
