@@ -3,9 +3,9 @@ name: YouTube Bot
 on:
   schedule:
     # Short ogni ora
-    - cron:  '0 * * * *'
+    - cron: '0 * * * *'
     # Long-form (8-10 min) ogni venerdì alle 18:00 CET
-    - cron:  '0 18 * * FRI'
+    - cron: '0 18 * * FRI'
   workflow_dispatch:      # avvio manuale
 
 jobs:
@@ -20,13 +20,14 @@ jobs:
     - name: Install system deps
       run: |
         sudo apt-get update -y
-        sudo apt-get install -y ffmpeg wget
+        sudo apt-get install -y ffmpeg wget      # pacchetti di sistema
         pip install --upgrade pip
         pip install -r requirements.txt
-        # Risolviamo il conflitto: installiamo le versioni compatibili
-        pip install piper-phonemize==1.1.0 piper-tts==1.2.0
+        # ↳ installiamo Piper e la libreria di fonemizzazione compatibile
+        pip install piper_phonemize==1.0.0
+        pip install piper-tts==1.1.0 --no-deps   # --no-deps per evitare conflitti
 
-    # 3) Esegue la pipeline (Short o Long a seconda del cron)
+    # 3) Esegue la pipeline (Short o Long in base al cron)
     - name: Run pipeline
       env:
         PEXELS_KEY:   ${{ secrets.PEXELS_KEY }}
