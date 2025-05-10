@@ -2,28 +2,39 @@ name: YouTube Bot
 
 on:
   schedule:
-    - cron:  '0 * * * *'       # Short ogni ora
-    - cron:  '0 18 * * FRI'    # Long-form venerdì 18:00 CET
-  workflow_dispatch:
+    # Short ogni ora
+    - cron:  '0 * * * *'
+    # Long-form (8-10 min) ogni venerdì alle 18:00 CET
+    - cron:  '0 18 * * FRI'
+  workflow_dispatch:      # avvio manuale
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
+    # 1) Clona il repository
     - uses: actions/checkout@v4
 
+    # 2) Installa dipendenze di sistema e Python
     - name: Install system deps
       run: |
         sudo apt-get update -y
-        sudo apt-get install -y ffmpeg wget piper-tts
+        sudo apt-get install -y ffmpeg wget          # ← rimosso piper-tts
         pip install --upgrade pip
         pip install -r requirements.txt
+        pip install piper-tts                        # ← installato via PyPI
 
+    # 3) Esegue la pipeline (Short o Long a seconda del cron)
     - name: Run pipeline
       env:
         PEXELS_KEY:   ${{ secrets.PEXELS_KEY }}
         HF_TOKEN:     ${{ secrets.HF_TOKEN }}
         GOOGLE_OAUTH: ${{ secrets.GOOGLE_OAUTH }}
       run: |
-        MODE=$([[ "${{ github.event.schedule }}" == '0 * * * *' ]] && echo short || echo long)
+        if [[ "${{ github.event.schedule }}" == '0 * * * *' ]]; then
+          MODE=short
+        else
+          MODE=long
+        fi
         python3 scripts/pipeline.py --mode $MODE
