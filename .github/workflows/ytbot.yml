@@ -16,38 +16,39 @@ jobs:
     # 1) Checkout del codice
     - uses: actions/checkout@v4
 
-    # 2) Setup Python 3.11
+    # 2) Installa ffmpeg + wget
+    - name: Install system deps
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install -y ffmpeg wget
+
+    # 3) Setup Python 3.11
     - uses: actions/setup-python@v5
       with:
         python-version: '3.11'
 
-    # 3) Unico step: crea venv, installa dipendenze e lancia pipeline
-    - name: Setup venv & run pipeline
-      shell: bash
+    # 4) Installa tutte le librerie in una cartella locale
+    - name: Install Python deps locally
+      run: |
+        python -m pip install --upgrade pip
+        # crea la cartella dei deps
+        mkdir -p python-deps
+        # installa requirements dentro python-deps
+        python -m pip install --target=python-deps -r requirements.txt
+        # installa Piper TTS senza dipendenze extra
+        python -m pip install --target=python-deps piper-tts==1.2.0 --no-deps
+
+    # 5) Esegue la pipeline usando python-deps via PYTHONPATH
+    - name: Run pipeline
       env:
+        PYTHONPATH: ${{ github.workspace }}/python-deps
         PEXELS_KEY:   ${{ secrets.PEXELS_KEY }}
         HF_TOKEN:     ${{ secrets.HF_TOKEN }}
         GOOGLE_OAUTH: ${{ secrets.GOOGLE_OAUTH }}
       run: |
-        # 3.1) Dipendenze di sistema
-        sudo apt-get update -y
-        sudo apt-get install -y ffmpeg wget
-
-        # 3.2) Venv Python
-        python -m venv .venv
-        source .venv/bin/activate
-
-        # 3.3) Pip e librerie
-        pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install piper-tts==1.2.0 --no-deps
-
-        # 3.4) Determina modalità da cron
         if [[ "${{ github.event.schedule }}" == '0 * * * *' ]]; then
           MODE=short
         else
           MODE=long
         fi
-
-        # 3.5) Esegui la pipeline
         python scripts/pipeline.py --mode $MODE
