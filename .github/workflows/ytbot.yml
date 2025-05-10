@@ -20,12 +20,11 @@ jobs:
     - name: Install system deps
       run: |
         sudo apt-get update -y
-        sudo apt-get install -y ffmpeg wget        # nessun piper-tts qui
+        sudo apt-get install -y ffmpeg wget          # niente piper-tts da apt
         pip install --upgrade pip
         pip install -r requirements.txt
-        # ↳ installiamo la coppia compatibile di Piper
-        pip install piper-phonemize==1.1.0
-        pip install piper-tts==1.2.0 --no-deps     # --no-deps evita conflitti
+        # installa solo piper-tts ignorando le dep. mancanti
+        pip install piper-tts==1.2.0 --no-deps
 
     # 3) Esegue la pipeline (Short o Long in base al cron)
     - name: Run pipeline
