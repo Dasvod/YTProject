@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # 1) Checkout
+    # 1) Checkout del codice
     - uses: actions/checkout@v4
 
     # 2) Setup Python 3.11
@@ -21,34 +21,33 @@ jobs:
       with:
         python-version: '3.11'
 
-    # 3) Installa dipendenze di sistema
-    - name: Install system deps
-      run: |
-        sudo apt-get update -y
-        sudo apt-get install -y ffmpeg wget
-
-    # 4) Crea ed entra in un virtualenv, installa tutto lì
-    - name: Setup venv & install Python deps
-      shell: bash
-      run: |
-        python -m venv venv
-        source venv/bin/activate
-        pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install piper-tts==1.2.0 --no-deps
-
-    # 5) Run pipeline usando il venv
-    - name: Run pipeline
+    # 3) Unico step: crea venv, installa dipendenze e lancia pipeline
+    - name: Setup venv & run pipeline
       shell: bash
       env:
         PEXELS_KEY:   ${{ secrets.PEXELS_KEY }}
         HF_TOKEN:     ${{ secrets.HF_TOKEN }}
         GOOGLE_OAUTH: ${{ secrets.GOOGLE_OAUTH }}
       run: |
-        source venv/bin/activate
+        # 3.1) Dipendenze di sistema
+        sudo apt-get update -y
+        sudo apt-get install -y ffmpeg wget
+
+        # 3.2) Venv Python
+        python -m venv .venv
+        source .venv/bin/activate
+
+        # 3.3) Pip e librerie
+        pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install piper-tts==1.2.0 --no-deps
+
+        # 3.4) Determina modalità da cron
         if [[ "${{ github.event.schedule }}" == '0 * * * *' ]]; then
           MODE=short
         else
           MODE=long
         fi
+
+        # 3.5) Esegui la pipeline
         python scripts/pipeline.py --mode $MODE
