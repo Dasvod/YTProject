@@ -21,9 +21,11 @@ jobs:
       with:
         python-version: '3.11'
 
-    # 3) Installa dipendenze Python
-    - name: Install Python dependencies
+    # 3) Installa FFmpeg, wget e dipendenze Python
+    - name: Install system & Python dependencies
       run: |
+        sudo apt-get update -y
+        sudo apt-get install -y ffmpeg wget
         python -m pip install --upgrade pip
         python -m pip install -r requirements.txt
         # Installa onnxruntime per Piper
