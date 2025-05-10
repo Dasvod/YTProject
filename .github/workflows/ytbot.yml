@@ -1,11 +1,11 @@
 name: YouTube Bot
 
 on:
-  schedule:
+ # schedule:
     # Short ogni ora
-    - cron: '0 * * * *'
+  #  - cron: '0 * * * *'
     # Long-form (8-10 min) ogni venerdì alle 18:00 CET
-    - cron: '0 18 * * FRI'
+ #   - cron: '0 18 * * FRI'
   workflow_dispatch:
 
 jobs:
