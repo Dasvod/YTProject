@@ -13,24 +13,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # 1) Checkout
+    # 1) Clona il repository
     - uses: actions/checkout@v4
 
-    # 2) Setup Python (installa 3.11 e mette `python` in PATH)
+    # 2) Setup Python 3.11
     - uses: actions/setup-python@v5
       with:
         python-version: '3.11'
 
-    # 3) Installa dipendenze di sistema e Python
-    - name: Install dependencies
+    # 3) Installa dipendenze di sistema e Python in site-packages di sistema
+    - name: Install system & Python deps
       run: |
         sudo apt-get update -y
-        sudo apt-get install -y ffmpeg wget
-        python -m pip install --upgrade pip
-        # installa tutte le librerie Python nel venv di setup-python
-        python -m pip install -r requirements.txt
-        # installa Piper TTS (skip delle dipendenze mancanti)
-        python -m pip install piper-tts==1.2.0 --no-deps
+        # Pip system-wide
+        sudo apt-get install -y ffmpeg wget python3-pip
+        # Ora pip punta al pip di sistema
+        sudo python3 -m pip install --upgrade pip setuptools wheel
+        # Installa le librerie nel site-packages di sistema
+        sudo python3 -m pip install -r requirements.txt
+        # Piper TTS (senza dipendenze extra)
+        sudo python3 -m pip install piper-tts==1.2.0 --no-deps
 
     # 4) Esegue la pipeline
     - name: Run pipeline
@@ -44,4 +46,4 @@ jobs:
         else
           MODE=long
         fi
-        python scripts/pipeline.py --mode $MODE
+        python3 scripts/pipeline.py --mode $MODE
