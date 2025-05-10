@@ -9,7 +9,11 @@ def tts(text, wav_path="voice.wav"):
     # Scarica il modello se manca
     m = pathlib.Path(MODEL)
     if not m.exists():
-        subprocess.run(["wget", "-q", URL], check=True)
+        try:
+            subprocess.run(["wget", "-q", URL], check=True)
+        except Exception:
+            # se il download fallisce, prosegui e lascia che piper fallisca gestendolo nel blocco successivo
+            pass
     try:
         # Prova a generare la voce con Piper
         subprocess.run([
