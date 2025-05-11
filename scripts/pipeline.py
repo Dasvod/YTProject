@@ -39,10 +39,13 @@ def gen_script(topic: str, mode: str) -> str:
     payload = {"inputs": prompt, "parameters": {"temperature": 0.7}}
 
     last_error = None
+    # Usa il modello corretto in minuscolo
+    url = "https://api-inference.huggingface.co/models/mistralai/mistral-7b-instruct"
+
     for attempt in range(1, 6):
         try:
             resp = requests.post(
-                "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct",
+                url,
                 headers=headers,
                 json=payload,
                 timeout=60
@@ -52,16 +55,13 @@ def gen_script(topic: str, mode: str) -> str:
             text = data[0].get("generated_text", "").strip()
             if text:
                 return text
-            else:
-                last_error = RuntimeError(f"Empty generation on attempt {attempt}")
+            last_error = RuntimeError(f"Empty generation on attempt {attempt}")
         except Exception as e:
             last_error = e
 
-        # se non è l'ultimo tentativo, attendi e riprova
         if attempt < 5:
             time.sleep(5)
 
-    # Dopo 5 tentativi, falliamo
     raise RuntimeError(f"HF generation failed after 5 attempts: {last_error}")
 
 def parse_topics(script: str) -> list[str]:
@@ -92,13 +92,10 @@ def upload(path: str, title: str, desc: str, short: bool = False):
 
 def run(mode: str):
     topic = pick_topic()
-    # Genera lo script (potrebbe sollevare se HF non risponde)
     script = gen_script(topic, mode)
-
-    wav = "voice.wav"
+    wav    = "voice.wav"
     tts(script, wav)
 
-    # Estrai sottotemi e recupera clip
     subtopics = parse_topics(script)
     clips = []
     if mode == "short" and subtopics:
@@ -110,14 +107,12 @@ def run(mode: str):
     out = f"{mode}.mp4"
     make_video(clips, wav, vertical=(mode == "short"), out=out)
 
-    # Titolo e descrizione
     if mode == "short" and subtopics:
         title = f"{topic}: {subtopics[0].strip()} e altre curiosità"
     else:
         title = topic
     desc = f"Scopri fatti e curiosità su {topic}! Guarda ora."
 
-    # Upload come Short se mode=="short"
     upload(out, title, desc, short=(mode == "short"))
 
 if __name__ == "__main__":
