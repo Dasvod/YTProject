@@ -4,40 +4,60 @@ import argparse
 import json
 import requests
 import re
+
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from trends import pick_topic
 from voice import tts
-from video import fetch_clips, make_video
+from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_videoclips
 
 HF    = os.environ.get("HF_TOKEN")
 OAUTH = os.environ["GOOGLE_OAUTH"]
+PEXELS_KEY = os.environ.get("PEXELS_KEY")
+
+# --- Funzioni di utilità ---
+
+def clean_text(raw_text: str) -> str:
+    """Rimuove prompt, markdown, emoji e caratteri speciali."""
+    # 1) elimina simboli markdown
+    text = re.sub(r'[`*_>#\-~]', '', raw_text)
+    # 2) rimuove emoji (range Unicode)
+    emoji_pattern = re.compile(
+        "["
+        "\U0001F600-\U0001F64F"  # emoticon
+        "\U0001F300-\U0001F5FF"  # simboli
+        "\U0001F680-\U0001F6FF"  # trasporti
+        "\U0001F1E0-\U0001F1FF"  # bandiere
+        "\u2600-\u2B55"
+        "]+",
+        flags=re.UNICODE
+    )
+    text = emoji_pattern.sub("", text)
+    # 3) trova inizio "1)" e scarta tutto ciò che lo precede
+    m = re.search(r'^\s*1\)', text, flags=re.MULTILINE)
+    if m:
+        text = text[m.start():]
+    # 4) normalizza spazi
+    return ' '.join(text.split())
 
 def gen_script(topic: str, mode: str) -> str:
     """
-    Genera uno script tramite Hugging Face Inference API.
-    Ritenta fino a 5 volte in caso di errori o risposte vuote,
-    con 5s di pausa; se dopo 5 tentativi non ottiene nulla,
-    solleva RuntimeError per bloccare la pipeline.
+    Genera il testo via HF, senza fallback esterni.
+    Riprova fino a 5 volte, poi raise.
     """
     if not HF:
         raise RuntimeError("HF_TOKEN non impostato!")
 
-    # Costruzione del prompt
-    if mode == "short":
-        prompt = (
-            f"Scrivi un testo entusiasmante di circa 150 parole su '{topic}', "
-            "diviso in 5 curiosità numerate, ognuna con almeno 2 frasi di spiegazione."
-        )
-    else:
-        prompt = (
-            f"Sviluppa un articolo/script di 800 parole sul tema '{topic}', "
-            "con 5 sezioni numerate, esempi concreti, e una conclusione coinvolgente."
-        )
+    prompt = (
+        f"Scrivi un testo entusiasmante di circa 150 parole su '{topic}', "
+        "diviso in 5 curiosità numerate, ognuna con almeno 2 frasi di spiegazione."
+        if mode == "short" else
+        f"Sviluppa un articolo di 800 parole su '{topic}', "
+        "con 5 sezioni numerate, esempi concreti e conclusione."
+    )
 
     headers = {"Authorization": f"Bearer {HF}"}
     payload = {"inputs": prompt, "parameters": {"temperature": 0.7}}
-    # Modello pubblico esistente
     url = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
 
     last_error = None
@@ -48,28 +68,28 @@ def gen_script(topic: str, mode: str) -> str:
             data = resp.json()
             text = data[0].get("generated_text", "").strip()
             if text:
-                return text
-            last_error = RuntimeError(f"Empty generation on attempt {attempt}")
+                return clean_text(text)
+            last_error = RuntimeError(f"Empty on attempt {attempt}")
         except Exception as e:
             last_error = e
         if attempt < 5:
             time.sleep(5)
+    raise RuntimeError(f"HF failed after 5 attempts: {last_error}")
 
-    # Dopo 5 tentativi, errore
-    raise RuntimeError(f"HF generation failed after 5 attempts: {last_error}")
-
-def parse_topics(script: str) -> list[str]:
+def parse_paragraphs(script: str) -> list[str]:
     """
-    Estrae i titoli delle curiosità/sezioni numerate.
+    Estrae ogni curiosità numerata come singolo paragrafo.
+    Ritorna la lista di frasi (senza "1)", "2)", ...).
     """
-    return re.findall(r"^\s*\d+\)\s*([^.\n]+)", script, flags=re.MULTILINE)
+    paras = []
+    for m in re.finditer(r'^\s*\d\)\s*(.+)', script, flags=re.MULTILINE):
+        paras.append(m.group(1).strip())
+    return paras
 
-def upload(path: str, title: str, desc: str, short: bool = False):
+def upload(path: str, title: str, desc: str, short: bool=False):
     creds = Credentials.from_authorized_user_info(json.loads(OAUTH))
     yt = build("youtube", "v3", credentials=creds)
-    tags = [title, "curiosità", "trend"]
-    if short:
-        tags.append("shorts")
+    tags = [title, "curiosità", "trend"] + (["shorts"] if short else [])
     body = {
         "snippet": {
             "title": title + (" #shorts" if short else ""),
@@ -80,33 +100,48 @@ def upload(path: str, title: str, desc: str, short: bool = False):
     }
     yt.videos().insert(part="snippet,status", body=body, media_body=path).execute()
 
+# --- Main pipeline ---
+
 def run(mode: str):
     topic = pick_topic()
     script = gen_script(topic, mode)
+    paras  = parse_paragraphs(script)
 
-    wav = "voice.wav"
-    tts(script, wav)
+    segments = []
+    for idx, para in enumerate(paras):
+        # 1) Genera audio
+        audio_file = f"audio_{idx}.wav"
+        tts(para, audio_file)
 
-    subtopics = parse_topics(script)
-    clips = []
-    if mode == "short" and subtopics:
-        for st in subtopics[:5]:
-            clips += fetch_clips(st.strip(), 1)
-    else:
-        clips = fetch_clips(topic, 4)
+        # 2) Scarica clip coerente (usa lo stesso fetch in video.py)
+        from video import fetch_one_clip
+        clip_file = fetch_one_clip(para, orientation = "portrait" if mode=="short" else "landscape")
 
-    out = f"{mode}.mp4"
-    make_video(clips, wav, vertical=(mode == "short"), out=out)
+        # 3) Allinea durata
+        audio_clip = AudioFileClip(audio_file)
+        duration   = audio_clip.duration
+        video_clip = VideoFileClip(clip_file).subclip(0, duration).without_audio()
 
-    if mode == "short" and subtopics:
-        title = f"{topic}: {subtopics[0].strip()} e altre curiosità"
+        # 4) Assegna audio al video
+        segment = video_clip.set_audio(audio_clip)
+        segments.append(segment)
+
+    # 5) Unisci segmenti
+    final = concatenate_videoclips(segments, method="compose")
+    out   = f"{mode}.mp4"
+    final.write_videofile(out, fps=30, codec="libx264", preset="veryfast")
+
+    # 6) Titolo e descrizione
+    if mode=="short" and paras:
+        title = f"{topic}: {paras[0]} e altre curiosità"
     else:
         title = topic
     desc = f"Scopri fatti e curiosità su {topic}! Guarda ora."
 
-    upload(out, title, desc, short=(mode == "short"))
+    # 7) Upload
+    upload(out, title, desc, short=(mode=="short"))
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--mode", choices=["short", "long"], required=True)
+    p.add_argument("--mode", choices=["short","long"], required=True)
     run(p.parse_args().mode)
