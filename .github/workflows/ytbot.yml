@@ -2,7 +2,7 @@ name: YouTube Bot
 
 on:
   schedule:
-    # Short ogni ora
+    # Shorts ogni ora
     - cron: '0 * * * *'
     # Long-form ogni venerdì alle 18:00 CET
     - cron: '0 18 * * FRI'
@@ -12,45 +12,37 @@ on:
         description: 'short o long'
         required: false
         default: 'short'
-        type: choice
-        options:
-          - short
-          - long
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    # 1) Checkout
     - uses: actions/checkout@v4
 
-    # 2) Python 3.11
-    - uses: actions/setup-python@v5
+    - name: Setup Python 3.11
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
 
-    # 3) System deps + pip
     - name: Install dependencies
       run: |
-        sudo apt-get update -y
-        sudo apt-get install -y ffmpeg wget
         python -m pip install --upgrade pip
         python -m pip install -r requirements.txt
-        python -m pip install onnxruntime
         python -m pip install piper-tts==1.2.0 --no-deps
 
-    # 4) Run pipeline
     - name: Run pipeline
       env:
         PEXELS_KEY:   ${{ secrets.PEXELS_KEY }}
         HF_TOKEN:     ${{ secrets.HF_TOKEN }}
         GOOGLE_OAUTH: ${{ secrets.GOOGLE_OAUTH }}
       run: |
-        if [[ "${{ github.event_name }}" == 'workflow_dispatch' ]]; then
-          MODE=${{ github.event.inputs.mode }}
-        else
-          # scheduled run
+        # determina la modalità: se dispatch usa l'input, altrimenti cron
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          MODE="${{ github.event.inputs.mode }}"
+        elif [[ "${{ github.event.schedule }}" == '0 * * * *' ]]; then
           MODE=short
+        else
+          MODE=long
         fi
-        python scripts/pipeline.py --mode $MODE
+        python scripts/pipeline.py --mode "$MODE"
