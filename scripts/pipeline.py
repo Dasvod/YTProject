@@ -1,4 +1,5 @@
 import os
+import time
 import argparse
 import json
 import requests
@@ -12,23 +13,17 @@ from video import fetch_clips, make_video
 HF    = os.environ.get("HF_TOKEN")
 OAUTH = os.environ["GOOGLE_OAUTH"]
 
-def wiki_fallback(topic):
-    """Recupera un estratto da Wikipedia IT se HF fallisce."""
-    try:
-        url = f"https://it.wikipedia.org/api/rest_v1/page/summary/{topic.replace(' ','_')}"
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        return data.get("extract", f"Ecco alcune informazioni su {topic}.")
-    except Exception:
-        return f"Ecco alcune informazioni interessanti su {topic}."
+def gen_script(topic: str, mode: str) -> str:
+    """
+    Genera lo script tramite Hugging Face Inference API.
+    Ritenta fino a 5 volte in caso di errori o risposte vuote,
+    con ritardo di 5 secondi tra i tentativi. Se poi non va,
+    solleva un'eccezione per bloccare la pipeline.
+    """
+    if not HF:
+        raise RuntimeError("HF_TOKEN non impostato!")
 
-def gen_script(topic, mode):
-    """
-    Genera lo script con HF; se fallisce, usa Wikipedia.
-    Short = 5 curiosità da ~30 parole ciascuna.
-    Long  = 5 sezioni da ~160 parole ciascuna.
-    """
+    # Costruzione del prompt
     if mode == "short":
         prompt = (
             f"Scrivi un testo entusiasmante di circa 150 parole su '{topic}', "
@@ -40,33 +35,42 @@ def gen_script(topic, mode):
             "con 5 sezioni numerate, esempi concreti, e una conclusione coinvolgente."
         )
 
-    if HF:
+    headers = {"Authorization": f"Bearer {HF}"}
+    payload = {"inputs": prompt, "parameters": {"temperature": 0.7}}
+
+    last_error = None
+    for attempt in range(1, 6):
         try:
             resp = requests.post(
                 "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct",
-                headers={"Authorization": f"Bearer {HF}"},
-                json={"inputs": prompt, "parameters": {"temperature":0.7}},
+                headers=headers,
+                json=payload,
                 timeout=60
             )
             resp.raise_for_status()
             data = resp.json()
-            text = data[0].get("generated_text","").strip()
+            text = data[0].get("generated_text", "").strip()
             if text:
                 return text
-        except Exception:
-            pass
+            else:
+                last_error = RuntimeError(f"Empty generation on attempt {attempt}")
+        except Exception as e:
+            last_error = e
 
-    # fallback su Wikipedia
-    return wiki_fallback(topic)
+        # se non è l'ultimo tentativo, attendi e riprova
+        if attempt < 5:
+            time.sleep(5)
 
-def parse_topics(script):
+    # Dopo 5 tentativi, falliamo
+    raise RuntimeError(f"HF generation failed after 5 attempts: {last_error}")
+
+def parse_topics(script: str) -> list[str]:
     """
-    Estrae i titoli delle curiosità/sezioni numerate.
-    Ritorna lista di sottotemi.
+    Estrae i titoli delle curiosità/sezioni numerate dal testo generato.
     """
     return re.findall(r"^\s*\d+\)\s*([^.\n]+)", script, flags=re.MULTILINE)
 
-def upload(path, title, desc, short=False):
+def upload(path: str, title: str, desc: str, short: bool = False):
     creds = Credentials.from_authorized_user_info(json.loads(OAUTH))
     yt = build("youtube", "v3", credentials=creds)
     tags = [title, "curiosità", "trend"]
@@ -86,13 +90,15 @@ def upload(path, title, desc, short=False):
         media_body=path
     ).execute()
 
-def run(mode):
+def run(mode: str):
     topic = pick_topic()
+    # Genera lo script (potrebbe sollevare se HF non risponde)
     script = gen_script(topic, mode)
-    wav    = "voice.wav"
+
+    wav = "voice.wav"
     tts(script, wav)
 
-    # Sottotemi per fetch clip
+    # Estrai sottotemi e recupera clip
     subtopics = parse_topics(script)
     clips = []
     if mode == "short" and subtopics:
@@ -102,16 +108,17 @@ def run(mode):
         clips = fetch_clips(topic, 4)
 
     out = f"{mode}.mp4"
-    make_video(clips, wav, vertical=(mode=="short"), out=out)
+    make_video(clips, wav, vertical=(mode == "short"), out=out)
 
-    # Titolo + descrizione
-    if mode=="short" and subtopics:
+    # Titolo e descrizione
+    if mode == "short" and subtopics:
         title = f"{topic}: {subtopics[0].strip()} e altre curiosità"
     else:
         title = topic
     desc = f"Scopri fatti e curiosità su {topic}! Guarda ora."
 
-    upload(out, title, desc, short=(mode=="short"))
+    # Upload come Short se mode=="short"
+    upload(out, title, desc, short=(mode == "short"))
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
