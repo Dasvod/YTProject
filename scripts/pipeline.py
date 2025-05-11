@@ -9,11 +9,17 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from trends import pick_topic
 from voice import tts
-from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_videoclips
+from moviepy.editor import (
+    VideoFileClip, AudioFileClip,
+    concatenate_videoclips, CompositeVideoClip, ColorClip
+)
 
 HF         = os.environ.get("HF_TOKEN")
 OAUTH      = os.environ["GOOGLE_OAUTH"]
 PEXELS_KEY = os.environ.get("PEXELS_KEY")
+
+# Dimensioni target per YouTube Short
+FRAME_W, FRAME_H = 1080, 1920
 
 def clean_text(raw_text: str) -> str:
     lines = raw_text.splitlines()
@@ -29,8 +35,8 @@ def clean_text(raw_text: str) -> str:
         flags=re.UNICODE
     )
     for line in lines:
-        line = re.sub(r'[`*_>#~-]', '', line)         # markdown chars
-        line = emoji_pattern.sub('', line)            # remove emoji
+        line = re.sub(r'[`*_>#~-]', '', line)
+        line = emoji_pattern.sub('', line)
         cleaned.append(line.strip())
     text = "\n".join(cleaned)
     m = re.search(r'^\s*1[.)]', text, flags=re.MULTILINE)
@@ -68,8 +74,10 @@ def gen_script(topic: str, mode: str) -> str:
     raise RuntimeError(f"HF failed after 5 attempts: {last_error}")
 
 def parse_paragraphs(script: str) -> list[str]:
-    paras = [m.group(1).strip()
-             for m in re.finditer(r'^\s*\d+[.)]\s*(.+)', script, flags=re.MULTILINE)]
+    paras = [
+        m.group(1).strip()
+        for m in re.finditer(r'^\s*\d+[.)]\s*(.+)', script, flags=re.MULTILINE)
+    ]
     if not paras:
         paras = [script.replace('\n', ' ')]
     return paras
@@ -83,7 +91,6 @@ def safe_title(raw_title: str, limit: int = 100) -> str:
     return title
 
 def upload(path: str, raw_title: str, desc: str, short: bool = False):
-    # includi suffix prima del safe_title
     suffix = " #shorts" if short else ""
     full_title = f"{raw_title}{suffix}"
     title = safe_title(full_title)
@@ -105,32 +112,49 @@ def run(mode: str):
     script = gen_script(topic, mode)
     paras  = parse_paragraphs(script)
 
+    # Costruiamo descrizione coerente con le curiosità
+    desc_lines = [f"{i+1}) {p}" for i, p in enumerate(paras[:5])]
+    desc = f"Scopri 5 curiosità su {topic}:\n" + "\n".join(desc_lines)
+
     segments = []
     for idx, para in enumerate(paras):
+        # 1) Genera audio
         audio_file = f"audio_{idx}.wav"
         tts(para, audio_file)
 
+        # 2) Scarica clip coerente
         from video import fetch_one_clip
-        clip_file = fetch_one_clip(para,
-                        orientation="portrait" if mode=="short" else "landscape")
+        clip_file = fetch_one_clip(
+            para,
+            orientation="portrait" if mode=="short" else "landscape"
+        )
 
+        # 3) Carica e allinea durata
         audio_clip = AudioFileClip(audio_file)
         duration   = audio_clip.duration
-        video_clip = VideoFileClip(clip_file).subclip(0, duration).without_audio()
+        v = VideoFileClip(clip_file).subclip(0, duration).without_audio()
 
-        segment = video_clip.set_audio(audio_clip)
+        # 4) Se vertical, up‐scale/pad a 1080×1920
+        if mode=="short":
+            v = v.resize(height=FRAME_H)  # scala per altezza
+            if v.w < FRAME_W:
+                bg = ColorClip(size=(FRAME_W, FRAME_H), color=(0,0,0), duration=duration)
+                v = CompositeVideoClip([bg, v.set_position("center")])
+
+        # 5) Assegna l’audio
+        segment = v.set_audio(audio_clip)
         segments.append(segment)
 
+    # 6) Concatenazione
     final = concatenate_videoclips(segments, method="compose")
     out   = f"{mode}.mp4"
     final.write_videofile(out, fps=30, codec="libx264", preset="veryfast")
 
+    # 7) Upload
     raw_title = (
         f"{topic}: {paras[0]} e altre curiosità"
         if mode=="short" and paras else topic
     )
-    desc = f"Scopri fatti e curiosità su {topic}! Guarda ora."
-
     upload(out, raw_title, desc, short=(mode=="short"))
 
 if __name__ == "__main__":
