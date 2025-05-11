@@ -29,8 +29,8 @@ def clean_text(raw_text: str) -> str:
         flags=re.UNICODE
     )
     for line in lines:
-        line = re.sub(r'[`*_>#~-]', '', line)
-        line = emoji_pattern.sub('', line)
+        line = re.sub(r'[`*_>#~-]', '', line)         # markdown chars
+        line = emoji_pattern.sub('', line)            # remove emoji
         cleaned.append(line.strip())
     text = "\n".join(cleaned)
     m = re.search(r'^\s*1[.)]', text, flags=re.MULTILINE)
@@ -41,7 +41,6 @@ def clean_text(raw_text: str) -> str:
 def gen_script(topic: str, mode: str) -> str:
     if not HF:
         raise RuntimeError("HF_TOKEN non impostato!")
-
     prompt = (
         f"Scrivi un testo entusiasmante di circa 150 parole su '{topic}', "
         "diviso in 5 curiosità numerate, ognuna con almeno 2 frasi di spiegazione."
@@ -65,36 +64,35 @@ def gen_script(topic: str, mode: str) -> str:
             last_error = RuntimeError(f"Empty on attempt {attempt}")
         except Exception as e:
             last_error = e
-        if attempt < 5:
-            time.sleep(5)
+        time.sleep(5)
     raise RuntimeError(f"HF failed after 5 attempts: {last_error}")
 
 def parse_paragraphs(script: str) -> list[str]:
-    paras = []
-    for m in re.finditer(r'^\s*\d+[.)]\s*(.+)', script, flags=re.MULTILINE):
-        paras.append(m.group(1).strip())
+    paras = [m.group(1).strip()
+             for m in re.finditer(r'^\s*\d+[.)]\s*(.+)', script, flags=re.MULTILINE)]
     if not paras:
         paras = [script.replace('\n', ' ')]
     return paras
 
 def safe_title(raw_title: str, limit: int = 100) -> str:
-    title = raw_title.strip()
-    # Rimuove newline e controlla lunghezza
-    title = title.replace('\n', ' ')
+    title = raw_title.replace('\n', ' ').strip()
     if len(title) > limit:
         title = title[: limit-3].rstrip() + "..."
     if not title:
         raise RuntimeError("Titolo video vuoto dopo pulizia!")
     return title
 
-def upload(path: str, title: str, desc: str, short: bool = False):
+def upload(path: str, raw_title: str, desc: str, short: bool = False):
+    # includi suffix prima del safe_title
+    suffix = " #shorts" if short else ""
+    full_title = f"{raw_title}{suffix}"
+    title = safe_title(full_title)
     creds = Credentials.from_authorized_user_info(json.loads(OAUTH))
     yt = build("youtube", "v3", credentials=creds)
-    title = safe_title(title)
     tags = [title, "curiosità", "trend"] + (["shorts"] if short else [])
     body = {
         "snippet": {
-            "title": title + (" #shorts" if short else ""),
+            "title": title,
             "description": desc,
             "tags": tags
         },
@@ -132,6 +130,7 @@ def run(mode: str):
         if mode=="short" and paras else topic
     )
     desc = f"Scopri fatti e curiosità su {topic}! Guarda ora."
+
     upload(out, raw_title, desc, short=(mode=="short"))
 
 if __name__ == "__main__":
