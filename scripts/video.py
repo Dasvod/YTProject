@@ -5,9 +5,6 @@ import random
 PEXELS_KEY = os.environ["PEXELS_KEY"]
 
 def fetch_clips(query: str, n: int = 3, orientation: str = "landscape") -> list[str]:
-    """
-    Restituisce fino a n clip coerenti con la query.
-    """
     headers = {"Authorization": PEXELS_KEY}
     url = (
         f"https://api.pexels.com/videos/search"
@@ -25,8 +22,7 @@ def fetch_clips(query: str, n: int = 3, orientation: str = "landscape") -> list[
     return out
 
 def fetch_one_clip(query: str, orientation: str = "landscape") -> str:
-    """
-    Scarica un singolo clip (il primo risultato) per la query.
-    """
     clips = fetch_clips(query, n=1, orientation=orientation)
-    return clips[0] if clips else None
+    if not clips:
+        raise RuntimeError(f"No clip found for \"{query}\"")
+    return clips[0]
