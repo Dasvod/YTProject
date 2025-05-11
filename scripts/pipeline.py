@@ -11,40 +11,45 @@ from trends import pick_topic
 from voice import tts
 from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_videoclips
 
-HF    = os.environ.get("HF_TOKEN")
-OAUTH = os.environ["GOOGLE_OAUTH"]
+HF         = os.environ.get("HF_TOKEN")
+OAUTH      = os.environ["GOOGLE_OAUTH"]
 PEXELS_KEY = os.environ.get("PEXELS_KEY")
 
-# --- Funzioni di utilità ---
+# --- Pulizia del testo preservando le righe ---
 
 def clean_text(raw_text: str) -> str:
-    """Rimuove prompt, markdown, emoji e caratteri speciali."""
-    # 1) elimina simboli markdown
-    text = re.sub(r'[`*_>#\-~]', '', raw_text)
-    # 2) rimuove emoji (range Unicode)
+    """
+    Rimuove prompt, markdown, emoji e caratteri speciali,
+    ma preserva i ritorni a capo per poter splittare le curiosità.
+    """
+    lines = raw_text.splitlines()
+    cleaned = []
     emoji_pattern = re.compile(
-        "["
-        "\U0001F600-\U0001F64F"  # emoticon
-        "\U0001F300-\U0001F5FF"  # simboli
-        "\U0001F680-\U0001F6FF"  # trasporti
-        "\U0001F1E0-\U0001F1FF"  # bandiere
+        "[" 
+        "\U0001F600-\U0001F64F"
+        "\U0001F300-\U0001F5FF"
+        "\U0001F680-\U0001F6FF"
+        "\U0001F1E0-\U0001F1FF"
         "\u2600-\u2B55"
         "]+",
         flags=re.UNICODE
     )
-    text = emoji_pattern.sub("", text)
-    # 3) trova inizio "1)" e scarta tutto ciò che lo precede
-    m = re.search(r'^\s*1\)', text, flags=re.MULTILINE)
+    for line in lines:
+        # elimina simboli markdown
+        line = re.sub(r'[`*_>#~-]', '', line)
+        # elimina emoji
+        line = emoji_pattern.sub('', line)
+        cleaned.append(line.strip())
+    text = "\n".join(cleaned)
+    # scarta tutto prima di "1)" o "1."
+    m = re.search(r'^\s*1[.)]', text, flags=re.MULTILINE)
     if m:
         text = text[m.start():]
-    # 4) normalizza spazi
-    return ' '.join(text.split())
+    return text.strip()
+
+# --- Generazione script con retry ---
 
 def gen_script(topic: str, mode: str) -> str:
-    """
-    Genera il testo via HF, senza fallback esterni.
-    Riprova fino a 5 volte, poi raise.
-    """
     if not HF:
         raise RuntimeError("HF_TOKEN non impostato!")
 
@@ -55,7 +60,6 @@ def gen_script(topic: str, mode: str) -> str:
         f"Sviluppa un articolo di 800 parole su '{topic}', "
         "con 5 sezioni numerate, esempi concreti e conclusione."
     )
-
     headers = {"Authorization": f"Bearer {HF}"}
     payload = {"inputs": prompt, "parameters": {"temperature": 0.7}}
     url = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
@@ -76,17 +80,23 @@ def gen_script(topic: str, mode: str) -> str:
             time.sleep(5)
     raise RuntimeError(f"HF failed after 5 attempts: {last_error}")
 
+# --- Estrai paragrafi / curiosità ---
+
 def parse_paragraphs(script: str) -> list[str]:
     """
-    Estrae ogni curiosità numerata come singolo paragrafo.
-    Ritorna la lista di frasi (senza "1)", "2)", ...).
+    Estrae ogni curiosità numerata (1), 2), 3., ecc.) come singolo paragrafo.
     """
     paras = []
-    for m in re.finditer(r'^\s*\d\)\s*(.+)', script, flags=re.MULTILINE):
+    for m in re.finditer(r'^\s*\d+[.)]\s*(.+)', script, flags=re.MULTILINE):
         paras.append(m.group(1).strip())
+    # se non trova nulla, usa l'intero script come unico paragrafo
+    if not paras:
+        paras = [script.replace('\n', ' ')]
     return paras
 
-def upload(path: str, title: str, desc: str, short: bool=False):
+# --- Upload YouTube ---
+
+def upload(path: str, title: str, desc: str, short: bool = False):
     creds = Credentials.from_authorized_user_info(json.loads(OAUTH))
     yt = build("youtube", "v3", credentials=creds)
     tags = [title, "curiosità", "trend"] + (["shorts"] if short else [])
@@ -100,7 +110,7 @@ def upload(path: str, title: str, desc: str, short: bool=False):
     }
     yt.videos().insert(part="snippet,status", body=body, media_body=path).execute()
 
-# --- Main pipeline ---
+# --- Pipeline principale ---
 
 def run(mode: str):
     topic = pick_topic()
@@ -109,24 +119,22 @@ def run(mode: str):
 
     segments = []
     for idx, para in enumerate(paras):
-        # 1) Genera audio
+        # 1) Genera audio per il paragrafo
         audio_file = f"audio_{idx}.wav"
         tts(para, audio_file)
-
-        # 2) Scarica clip coerente (usa lo stesso fetch in video.py)
+        # 2) Scarica clip coerente
         from video import fetch_one_clip
-        clip_file = fetch_one_clip(para, orientation = "portrait" if mode=="short" else "landscape")
-
+        clip_file = fetch_one_clip(para,
+                        orientation="portrait" if mode=="short" else "landscape")
         # 3) Allinea durata
         audio_clip = AudioFileClip(audio_file)
         duration   = audio_clip.duration
         video_clip = VideoFileClip(clip_file).subclip(0, duration).without_audio()
-
-        # 4) Assegna audio al video
+        # 4) Assegna l’audio al video
         segment = video_clip.set_audio(audio_clip)
         segments.append(segment)
 
-    # 5) Unisci segmenti
+    # 5) Concatenazione dei segmenti
     final = concatenate_videoclips(segments, method="compose")
     out   = f"{mode}.mp4"
     final.write_videofile(out, fps=30, codec="libx264", preset="veryfast")
