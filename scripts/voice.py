@@ -1,28 +1,14 @@
-import subprocess, os
+import subprocess
 from gtts import gTTS
 
-def tts(text, wav_path="voice.wav"):
-    # Genera audio con gTTS
-    try:
-        tts = gTTS(text, lang='it')
-        tmp_mp3 = "voice.mp3"
-        tts.save(tmp_mp3)
-        # converte in WAV
-        subprocess.run([
-            "ffmpeg", "-y",
-            "-i", tmp_mp3,
-            "-ar", "44100",
-            wav_path
-        ], check=True)
-        os.remove(tmp_mp3)
-    except Exception:
-        # fallback 1s di silenzio
-        subprocess.run([
-            "ffmpeg", "-y",
-            "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
-            "-t", "1", wav_path
-        ], check=True)
-
-if __name__ == "__main__":
-    import sys
-    tts(sys.stdin.read())
+def tts(text: str, out_wav: str):
+    """
+    Genera audio in inglese con gTTS → mp3 → wav (ffmpeg richiesto).
+    """
+    mp3 = out_wav.replace('.wav','.mp3')
+    gTTS(text=text, lang='en').save(mp3)
+    # converti in wav
+    subprocess.run([
+        'ffmpeg','-y','-i', mp3,
+        '-ar','24000','-ac','1', out_wav
+    ], check=True)
