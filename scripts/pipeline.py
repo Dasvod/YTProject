@@ -13,6 +13,11 @@ from moviepy.editor import (
     VideoFileClip, AudioFileClip,
     concatenate_videoclips, CompositeVideoClip, ColorClip
 )
+# Import PIL per patchare ANTIALIAS
+from PIL import Image
+# Se ANTIALIAS non esiste (Pillow>=10), alias in LANCZOS
+if not hasattr(Image, "ANTIALIAS"):
+    Image.ANTIALIAS = Image.LANCZOS
 
 HF         = os.environ.get("HF_TOKEN")
 OAUTH      = os.environ["GOOGLE_OAUTH"]
@@ -112,45 +117,40 @@ def run(mode: str):
     script = gen_script(topic, mode)
     paras  = parse_paragraphs(script)
 
-    # Costruiamo descrizione coerente con le curiosità
+    # Costruisci descrizione coerente
     desc_lines = [f"{i+1}) {p}" for i, p in enumerate(paras[:5])]
     desc = f"Scopri 5 curiosità su {topic}:\n" + "\n".join(desc_lines)
 
     segments = []
     for idx, para in enumerate(paras):
-        # 1) Genera audio
         audio_file = f"audio_{idx}.wav"
         tts(para, audio_file)
 
-        # 2) Scarica clip coerente
         from video import fetch_one_clip
         clip_file = fetch_one_clip(
             para,
             orientation="portrait" if mode=="short" else "landscape"
         )
 
-        # 3) Carica e allinea durata
         audio_clip = AudioFileClip(audio_file)
         duration   = audio_clip.duration
         v = VideoFileClip(clip_file).subclip(0, duration).without_audio()
 
-        # 4) Se vertical, up‐scale/pad a 1080×1920
         if mode=="short":
-            v = v.resize(height=FRAME_H)  # scala per altezza
+            # scala in base all'altezza
+            v = v.resize(height=FRAME_H)
+            # se troppo stretto, centra su sfondo nero
             if v.w < FRAME_W:
                 bg = ColorClip(size=(FRAME_W, FRAME_H), color=(0,0,0), duration=duration)
                 v = CompositeVideoClip([bg, v.set_position("center")])
 
-        # 5) Assegna l’audio
         segment = v.set_audio(audio_clip)
         segments.append(segment)
 
-    # 6) Concatenazione
     final = concatenate_videoclips(segments, method="compose")
     out   = f"{mode}.mp4"
     final.write_videofile(out, fps=30, codec="libx264", preset="veryfast")
 
-    # 7) Upload
     raw_title = (
         f"{topic}: {paras[0]} e altre curiosità"
         if mode=="short" and paras else topic
