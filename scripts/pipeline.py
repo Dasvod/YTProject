@@ -14,79 +14,99 @@ HF    = os.environ.get("HF_TOKEN")
 OAUTH = os.environ["GOOGLE_OAUTH"]
 
 def gen_script(topic: str, mode: str) -> str:
+    """
+    Genera uno script tramite Hugging Face Inference API.
+    Ritenta fino a 5 volte in caso di errori o risposte vuote,
+    con 5s di pausa; se dopo 5 tentativi non ottiene nulla,
+    solleva RuntimeError per bloccare la pipeline.
+    """
     if not HF:
         raise RuntimeError("HF_TOKEN non impostato!")
 
-    # Prompt
-    prompt = (
-        f"Scrivi un testo entusiasmante di circa 150 parole su '{topic}', "
-        "diviso in 5 curiosità numerate, ognuna con almeno 2 frasi di spiegazione."
-        if mode=="short"
-        else
-        f"Sviluppa un articolo/script di 800 parole sul tema '{topic}', "
-        "con 5 sezioni numerate, esempi concreti, e una conclusione coinvolgente."
-    )
+    # Costruzione del prompt
+    if mode == "short":
+        prompt = (
+            f"Scrivi un testo entusiasmante di circa 150 parole su '{topic}', "
+            "diviso in 5 curiosità numerate, ognuna con almeno 2 frasi di spiegazione."
+        )
+    else:
+        prompt = (
+            f"Sviluppa un articolo/script di 800 parole sul tema '{topic}', "
+            "con 5 sezioni numerate, esempi concreti, e una conclusione coinvolgente."
+        )
 
     headers = {"Authorization": f"Bearer {HF}"}
     payload = {"inputs": prompt, "parameters": {"temperature": 0.7}}
-    url = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.1"
+    # Modello pubblico esistente
+    url = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
 
     last_error = None
-    for attempt in range(1,6):
+    for attempt in range(1, 6):
         try:
             resp = requests.post(url, headers=headers, json=payload, timeout=60)
             resp.raise_for_status()
             data = resp.json()
-            text = data[0].get("generated_text","").strip()
+            text = data[0].get("generated_text", "").strip()
             if text:
                 return text
             last_error = RuntimeError(f"Empty generation on attempt {attempt}")
         except Exception as e:
             last_error = e
-        if attempt<5:
+        if attempt < 5:
             time.sleep(5)
 
-    # Dopo 5 tentativi fallisce
+    # Dopo 5 tentativi, errore
     raise RuntimeError(f"HF generation failed after 5 attempts: {last_error}")
 
 def parse_topics(script: str) -> list[str]:
+    """
+    Estrae i titoli delle curiosità/sezioni numerate.
+    """
     return re.findall(r"^\s*\d+\)\s*([^.\n]+)", script, flags=re.MULTILINE)
 
-def upload(path: str, title: str, desc: str, short: bool=False):
+def upload(path: str, title: str, desc: str, short: bool = False):
     creds = Credentials.from_authorized_user_info(json.loads(OAUTH))
-    yt = build("youtube","v3",credentials=creds)
-    tags=[title,"curiosità","trend"]
-    if short: tags.append("shorts")
-    body={
-      "snippet":{"title":title+(" #shorts" if short else ""),
-                 "description":desc,"tags":tags},
-      "status":{"privacyStatus":"public"}
+    yt = build("youtube", "v3", credentials=creds)
+    tags = [title, "curiosità", "trend"]
+    if short:
+        tags.append("shorts")
+    body = {
+        "snippet": {
+            "title": title + (" #shorts" if short else ""),
+            "description": desc,
+            "tags": tags
+        },
+        "status": {"privacyStatus": "public"}
     }
-    yt.videos().insert(part="snippet,status",body=body,media_body=path).execute()
+    yt.videos().insert(part="snippet,status", body=body, media_body=path).execute()
 
 def run(mode: str):
     topic = pick_topic()
-    script=gen_script(topic,mode)
-    wav="voice.wav"
-    tts(script,wav)
+    script = gen_script(topic, mode)
 
-    subs=parse_topics(script)
-    clips=[]
-    if mode=="short" and subs:
-        for st in subs[:5]:
-            clips+=fetch_clips(st.strip(),1)
+    wav = "voice.wav"
+    tts(script, wav)
+
+    subtopics = parse_topics(script)
+    clips = []
+    if mode == "short" and subtopics:
+        for st in subtopics[:5]:
+            clips += fetch_clips(st.strip(), 1)
     else:
-        clips=fetch_clips(topic,4)
+        clips = fetch_clips(topic, 4)
 
-    out=f"{mode}.mp4"
-    make_video(clips,wav,vertical=(mode=="short"),out=out)
+    out = f"{mode}.mp4"
+    make_video(clips, wav, vertical=(mode == "short"), out=out)
 
-    title=(f"{topic}: {subs[0].strip()} e altre curiosità"
-           if mode=="short" and subs else topic)
-    desc=f"Scopri fatti e curiosità su {topic}! Guarda ora."
-    upload(out,title,desc,short=(mode=="short"))
+    if mode == "short" and subtopics:
+        title = f"{topic}: {subtopics[0].strip()} e altre curiosità"
+    else:
+        title = topic
+    desc = f"Scopri fatti e curiosità su {topic}! Guarda ora."
 
-if __name__=="__main__":
-    p=argparse.ArgumentParser()
-    p.add_argument("--mode",choices=["short","long"],required=True)
+    upload(out, title, desc, short=(mode == "short"))
+
+if __name__ == "__main__":
+    p = argparse.ArgumentParser()
+    p.add_argument("--mode", choices=["short", "long"], required=True)
     run(p.parse_args().mode)
